@@ -72,7 +72,7 @@ def gcsfs_to_geopandas(fs, BUCKET_NAME, file_name, columns=None):
 
 
 @st.experimental_memo(ttl=900)
-def read_glocal_data(path_in_bucket, columns=None, spatial=False):
+def read_data(path_in_bucket, columns=None, spatial=False):
     # Get GCSFS
     fs = prepare_gcsfs()
     # Set GCS bucket name
@@ -89,7 +89,7 @@ def read_glocal_data(path_in_bucket, columns=None, spatial=False):
 # -------------------------#
 st.sidebar.title("Viz parameters")
 # Read general data
-country_codes = read_glocal_data("country_codes.parquet")
+country_codes = read_data("country_codes.parquet")
 # Country
 selected_country_name = st.sidebar.selectbox(
     "Country", country_codes.country_name.unique()
@@ -98,8 +98,8 @@ selected_country = country_codes[
     country_codes.country_name == selected_country_name
 ].country_code.values[0]
 # Variable
-available_cols = read_glocal_data("available_cols.parquet")
-varlist = [x for x in available_cols if x not in ["year", "GID_0"]]
+available_cols = read_data("available_cols.parquet")
+varlist = [x for x in available_cols.colname if x not in ["year", "GID_0"]]
 selected_var = st.sidebar.selectbox("Variable", varlist)
 # GADM level
 selected_gadm_string = st.sidebar.radio("GADM level", ["GID_0", "GID_1", "GID_2"])
@@ -118,7 +118,9 @@ def read_glocal_var(level, selected_var):
         vars_to_read = ["year", "GID_0", "GID_1", selected_var]
     elif level == 2:
         vars_to_read = ["year", "GID_0", "GID_2", selected_var]
-    df = read_glocal_data(
+    else:
+        raise ValueError("GADM level not supported")
+    df = read_data(
         f"annualized_level_{level}.parquet",
         columns=vars_to_read,
     )
@@ -127,19 +129,59 @@ def read_glocal_var(level, selected_var):
 
 
 # Read glocal data
-glocal_0 = read_glocal_var(0)
+glocal_0 = read_glocal_var(0, selected_var)
 
 # Ranks
-glocal_0_rank = read_glocal_data(
-    "glocal_0_rank.parquet", columns=["year", "GID_0", selected_var]
+glocal_0_rank = read_data(
+    "supporting_data/glocal_0_rank.parquet", columns=["year", "GID_0", selected_var]
 )
 
 # Missing values
 glocal_missing_dict = {}
 for x in [0, 1, 2]:
-    glocal_missing_dict[x] = read_glocal_data(
-        f"glocal_{x}_missing.parquet", columns=["year", "GID_0", selected_var]
+    glocal_missing_dict[x] = read_data(
+        f"supporting_data/glocal_{x}_missing.parquet",
+        columns=["year", "GID_0", selected_var],
     )
+
+# Get the latest year for which data is available for the selected country at each level
+availability_dict = {}
+for x in [0, 1, 2]:
+    missingvals_year = glocal_missing_dict[x].loc[
+        (glocal_missing_dict[x]["GID_0"] == selected_country)
+        & (glocal_missing_dict[x][selected_var] < 1),
+        "year",
+    ]
+    availability_dict[x] = (missingvals_year.min(), missingvals_year.max())
+
+
+# ----------------
+# Add additional elements to sidebar
+# Multiselect for comparator countries
+selected_comparator_names = st.sidebar.multiselect(
+    label="Select comparator countries",
+    options=[
+        x for x in country_codes.country_name.unique() if x != selected_country_name
+    ],
+    default=None,
+)
+if selected_comparator_names:
+    selected_comparators = country_codes[
+        country_codes.country_name.isin(selected_comparator_names)
+    ].country_code.values
+    selected_countries = [selected_country] + list(selected_comparators)
+else:
+    selected_countries = [selected_country]
+
+# Slider select for year
+selected_year = st.sidebar.slider(
+    "Select years for analysis",
+    min_value=availability_dict[selected_gadm_level][0],
+    max_value=availability_dict[selected_gadm_level][1],
+    value=availability_dict[selected_gadm_level],
+    step=1,
+)
+
 
 # ------------------------------------
 # Intro text
@@ -160,47 +202,18 @@ st.markdown(
 # ------------------------------------
 # National level exhibits
 # ------------------------------------
-# Get the latest year for which data is available for the selected country at each level
-latest_year_dict = {}
-for x in [0, 1, 2]:
-    latest_year_dict[x] = (
-        glocal_missing_dict[x]
-        .loc[
-            (glocal_missing_dict[x]["GID_0"] == selected_country)
-            & (glocal_missing_dict[x][selected_var] < 1),
-            "year",
-        ]
-        .max()
-    )
-
 st.markdown(
     f"""
     ## National Level Exhibits
 
     ### Data availability
 
-    Latest year for which data is available at each level:
-    - Level 0: {latest_year_dict[0]}
-    - Level 1: {latest_year_dict[1]}
-    - Level 2: {latest_year_dict[2]}
+    Earliest and latest year for which data is available at each level:
+    - Level 0: {availability_dict[0]}
+    - Level 1: {availability_dict[1]}
+    - Level 2: {availability_dict[2]}
     """
 )
-# ----------------
-# Multiselect for comparator countries
-selected_comparator_names = st.multiselect(
-    label="Select comparator countries",
-    options=[
-        x for x in country_codes.country_name.unique() if x != selected_country_name
-    ],
-    default=None,
-)
-if selected_comparator_names:
-    selected_comparators = country_codes[
-        country_codes.country_name.isin(selected_comparator_names)
-    ].country_code.values
-    selected_countries = [selected_country] + selected_comparators.tolist()
-else:
-    selected_countries = [selected_country]
 
 # ----------------
 # Plot the missing value percentage of the selected country for the selected variable
@@ -208,7 +221,8 @@ else:
 # Filter data
 missing_val_df = glocal_missing_dict[selected_gadm_level]
 missing_year = missing_val_df.loc[
-    (missing_val_df["GID_0"].isin(selected_countries)),
+    (missing_val_df["GID_0"].isin(selected_countries))
+    & (missing_val_df.year.between(*selected_year)),
     ["year", "GID_0", selected_var],
 ]
 # Lineplot
@@ -225,18 +239,19 @@ missing_px.update_xaxes(tickformat="%Y")
 st.plotly_chart(missing_px, use_container_width=True)
 
 # ----------------
-# Get the latest percentile rank of the selected country for the selected variable
-rank = glocal_0_rank.loc[
-    (glocal_0_rank["GID_0"].isin(selected_countries))
-    & (glocal_0_rank["year"] == latest_year_dict[0]),
-    selected_var,
-].values[0]
+# # Get the latest percentile rank of the selected country for the selected variable
+# rank = glocal_0_rank.loc[
+#     (glocal_0_rank["GID_0"].isin(selected_countries))
+#     & (glocal_0_rank["year"] == availability_dict[0][1]),
+#     selected_var,
+# ].values[0]
 
 # ----------------
 # Plot the time series of the selected country for the selected variable
 # Filter data
 var_year = glocal_0.loc[
-    (glocal_0["GID_0"].isin(selected_countries)),
+    (glocal_0["GID_0"].isin(selected_countries))
+    & (glocal_0.year.between(*selected_year)),
     ["year", "GID_0", selected_var],
 ]
 # Lineplot
@@ -255,7 +270,8 @@ st.plotly_chart(var_year_px, use_container_width=True)
 # Plot the time series of the rank for the selected country for the selected variable
 # Filter data
 var_rank_year = glocal_0_rank.loc[
-    (glocal_0_rank["GID_0"].isin(selected_countries)),
+    (glocal_0_rank["GID_0"].isin(selected_countries))
+    & (glocal_0_rank.year.between(*selected_year)),
     ["year", "GID_0", selected_var],
 ].dropna()
 # Lineplot
@@ -288,7 +304,9 @@ else:
 # Choropleth map
 st.markdown(
     f"""
-    ## Choropleth map
+    ## Subnational trends
+
+    Subnational trends for {selected_var} averaged over the years: {selected_year[0]}-{selected_year[1]}, at GADM level {subnational_gadm_level} administrative boundaries.
     """
 )
 # Read glocal data
@@ -301,8 +319,13 @@ elif selected_gadm_level == 2:
 else:
     raise ValueError("Subnational GADM level must be 1, or 2.")
 
-# glocal_latest = glocal[(glocal["GID_0"] == selected_country)]
-glocal_latest = glocal[glocal["year"] == glocal["year"].max()]
+# Add a year filter
+glocal_subnational = (
+    glocal[glocal["year"].between(*selected_year)]
+    .groupby(f"GID_{subnational_gadm_level}")[selected_var]
+    .mean()
+    .reset_index()
+)
 
 # Read in shapefile and convert to geojson
 @st.experimental_memo(ttl=900)
@@ -312,9 +335,10 @@ def get_country_shapefile(level, country):
         f"NAME_{level}",
         "geometry",
     ]
-    gdf = read_glocal_data(
+    gdf = read_data(
         f"simplified_shapefiles/gadm/country_level/gadm_{level}/{country}.parquet",
         columns=vars_to_read,
+        spatial=True,
     )
     gdf_json = json.loads(gdf.to_json())
     return gdf_json
@@ -325,7 +349,7 @@ gdf_json = get_country_shapefile(subnational_gadm_level, selected_country)
 
 # Plotly choropleth map
 chropleth_px = px.choropleth(
-    glocal_latest,
+    glocal_subnational,
     geojson=gdf_json,
     locations=f"GID_{subnational_gadm_level}",
     featureidkey=f"properties.GID_{subnational_gadm_level}",
