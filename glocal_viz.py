@@ -176,9 +176,9 @@ else:
 # Slider select for year
 selected_year = st.sidebar.slider(
     "Select years for analysis",
-    min_value=availability_dict[selected_gadm_level][0],
-    max_value=availability_dict[selected_gadm_level][1],
-    value=availability_dict[selected_gadm_level],
+    min_value=int(availability_dict[selected_gadm_level][0]),
+    max_value=int(availability_dict[selected_gadm_level][1]),
+    value=tuple([x for x in availability_dict[selected_gadm_level]]),
     step=1,
 )
 
