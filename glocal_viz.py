@@ -190,12 +190,11 @@ selected_year = st.sidebar.slider(
 st.title("Glocal Aggregations")
 st.markdown(
     """
-    This app visualizes the aggregations developed as part of the Glocal project, which aims to develop a dataset that is globally comparable and yet granular enough to be locally relevant. The aggregations are developed at three levels: GID_0 (country), GID_1 (state/province), and GID_2 (county), using GADM v3.6.
+    This app visualizes the aggregations developed as part of the Glocal project, which aims to develop a dataset that is globally comparable and yet granular enough to be locally relevant. The aggregations are developed at three levels of administrative boundaries: GID_0 (country), GID_1 (state/province), and GID_2 (county), using boundaries data from [GADM v3.6](https://gadm.org/download_world36.html).
 
     Resources:
     - [Codebook](https://docs.google.com/spreadsheets/d/1JWInGw6vcGZPi3TgEsZ66OyCA_t_kLjGYhIZTIJyl_Q/edit#gid=0)
     - [Github Repository](https://github.com/cid-harvard/glocal_aggregations)
-    - [Data](https://www.dropbox.com/sh/tphr6wkxhggzgke/AAB062OWCrvoYjg6gQ8pjFgPa?dl=0)
     """
 )
 
@@ -204,9 +203,7 @@ st.markdown(
 # ------------------------------------
 st.markdown(
     f"""
-    ## National Level Exhibits
-
-    ### Data availability
+    ## Data availability
 
     Earliest and latest year for which data is available at each level:
     - Level 0: {availability_dict[0]}
@@ -234,6 +231,7 @@ missing_px = px.line(
     title="Fraction of values missing",
     markers=True,
     labels={"year": "Year", selected_var: "Fraction of values missing"},
+    template="plotly_white",
 )
 missing_px.update_xaxes(tickformat="%Y")
 st.plotly_chart(missing_px, use_container_width=True)
@@ -247,6 +245,8 @@ st.plotly_chart(missing_px, use_container_width=True)
 # ].values[0]
 
 # ----------------
+st.markdown("## National Trends")
+
 # Plot the time series of the selected country for the selected variable
 # Filter data
 var_year = glocal_0.loc[
@@ -262,6 +262,7 @@ var_year_px = px.line(
     color="GID_0",
     title=f"Time series of {selected_var}",
     markers=True,
+    template="plotly_white",
 )
 var_year_px.update_xaxes(tickformat="%Y")
 st.plotly_chart(var_year_px, use_container_width=True)
@@ -283,6 +284,7 @@ var_rank_year_px = px.line(
     title=f"Rank for variable {selected_var}",
     markers=True,
     labels={"x": "Year", "y": f"Rank for {selected_var}"},
+    template="plotly_white",
 )
 var_rank_year_px.update_xaxes(tickformat="%Y")
 st.plotly_chart(var_rank_year_px, use_container_width=True)
@@ -307,6 +309,8 @@ st.markdown(
     ## Subnational trends
 
     Subnational trends for {selected_var} averaged over the years: {selected_year[0]}-{selected_year[1]}, at GADM level {subnational_gadm_level} administrative boundaries.
+    
+    Note that administrative boundaries are obtained from [GADM v3.6](https://gadm.org/download_world36.html), and are slightly simplified for display purposes.
     """
 )
 # Read glocal data
