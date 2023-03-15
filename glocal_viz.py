@@ -160,7 +160,10 @@ for x in [0, 1, 2]:
         & (glocal_missing_dict[x][selected_var] < 1),
         "year",
     ]
-    availability_dict[x] = (missingvals_year.min(), missingvals_year.max())
+    if missingvals_year.min() == missingvals_year.max():
+        availability_dict[x] = (missingvals_year.min(), missingvals_year.max() + 1)
+    else:
+        availability_dict[x] = (missingvals_year.min(), missingvals_year.max())
 
 
 # ----------------
@@ -275,6 +278,13 @@ st.plotly_chart(missing_px, use_container_width=True)
 # ----------------
 st.markdown("## National Trends")
 
+if missingvals_year.min() == missingvals_year.max():
+    st.markdown(
+        f"""
+        Trend data unavailable. Data is available for the selected variable for the selected country only for the year {missingvals_year.min()}.
+        """
+    )
+
 # Plot the time series of the selected country for the selected variable
 # Filter data
 var_year = glocal_0.loc[
@@ -387,8 +397,9 @@ chropleth_px = px.choropleth(
     featureidkey=f"properties.GID_{subnational_gadm_level}",
     color=selected_var,
     color_continuous_scale="Viridis",
+    # hover_data = [f"NAME_{subnational_gadm_level}"],
     labels={
-        selected_var: selected_var_name,
+        selected_var: selected_var_name + " (" + docs_dict["units"] + ")",
         f"GID_{subnational_gadm_level}": "GID",
         f"NAME_{subnational_gadm_level}": "Region",
     },
