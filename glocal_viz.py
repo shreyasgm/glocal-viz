@@ -88,7 +88,10 @@ def read_data(path_in_bucket, columns=None, spatial=False):
 # Set up sidebar
 # -------------------------#
 st.sidebar.title("Viz parameters")
+
 # Read general data
+
+# Country codes
 country_codes = read_data("country_codes.parquet")
 # Country
 selected_country_name = st.sidebar.selectbox(
@@ -97,10 +100,15 @@ selected_country_name = st.sidebar.selectbox(
 selected_country = country_codes[
     country_codes.country_name == selected_country_name
 ].country_code.values[0]
+# Documentation
+docs = read_data("docs.parquet")
 # Variable
 available_cols = read_data("available_cols.parquet")
-varlist = [x for x in available_cols.colname if x not in ["year", "GID_0"]]
-selected_var = st.sidebar.selectbox("Variable", varlist)
+varlist = list(available_cols.variable_name)
+selected_var_name = st.sidebar.selectbox("Variable", varlist)
+selected_var = available_cols[
+    available_cols.variable_name == selected_var_name
+].colname.values[0]
 # GADM level
 selected_gadm_string = st.sidebar.radio("GADM level", ["GID_0", "GID_1", "GID_2"])
 selected_gadm_level = int(selected_gadm_string[-1])
@@ -193,8 +201,28 @@ st.markdown(
     This app visualizes the aggregations developed as part of the Glocal project, which aims to develop a dataset that is globally comparable and yet granular enough to be locally relevant. The aggregations are developed at three levels of administrative boundaries: GID_0 (country), GID_1 (state/province), and GID_2 (county), using boundaries data from [GADM v3.6](https://gadm.org/download_world36.html).
 
     Resources:
-    - [Codebook](https://docs.google.com/spreadsheets/d/1JWInGw6vcGZPi3TgEsZ66OyCA_t_kLjGYhIZTIJyl_Q/edit#gid=0)
+    - [Codebook](https://docs.google.com/spreadsheets/d/1d0YqkrAhZBW8tK4TvkE7_JBaDa6OgRxV5VgBojAHo_Y/edit#gid=783859190)
     - [Github Repository](https://github.com/cid-harvard/glocal_aggregations)
+    """
+)
+
+docs_dict = docs.loc[docs.variable == selected_var].to_dict(orient="records")[0]
+
+st.markdown(
+    f"""
+    ## Variable information
+
+    - Variable: {docs_dict["variable_name"]}
+    - Units: {docs_dict["units"]}
+    - Description: {docs_dict["description"]}
+    - Frequency: {docs_dict["frequency"]}
+    - Resolution: {docs_dict["resolution"]}
+    - Dataset name: {docs_dict["dataset_name"]}
+    - Source: {docs_dict["source"]}
+    - Source URL: {docs_dict["source_url"]}
+    - Terms of use: {docs_dict["license_terms_of_use"]}
+    - Citation: {docs_dict["citation"]}
+    
     """
 )
 
@@ -253,14 +281,14 @@ var_year = glocal_0.loc[
     (glocal_0["GID_0"].isin(selected_countries))
     & (glocal_0.year.between(*selected_year)),
     ["year", "GID_0", selected_var],
-]
+].sort_values(["year", "GID_0"])
 # Lineplot
 var_year_px = px.line(
     var_year,
     x="year",
     y=selected_var,
     color="GID_0",
-    title=f"Time series of {selected_var}",
+    title=f"{selected_var_name} ({docs_dict['units']})",
     markers=True,
     template="plotly_white",
 )
@@ -281,9 +309,9 @@ var_rank_year_px = px.line(
     x="year",
     y=selected_var,
     color="GID_0",
-    title=f"Rank for variable {selected_var}",
+    title=f"Rank for variable {selected_var_name}",
     markers=True,
-    labels={"x": "Year", "y": f"Rank for {selected_var}"},
+    labels={"x": "Year", "y": f"Rank for {selected_var_name}"},
     template="plotly_white",
 )
 var_rank_year_px.update_xaxes(tickformat="%Y")
@@ -308,7 +336,7 @@ st.markdown(
     f"""
     ## Subnational trends
 
-    Subnational trends for {selected_var} averaged over the years: {selected_year[0]}-{selected_year[1]}, at GADM level {subnational_gadm_level} administrative boundaries.
+    Subnational trends for {selected_var_name} averaged over the years: {selected_year[0]}-{selected_year[1]}, at GADM level {subnational_gadm_level} administrative boundaries.
     
     Note that administrative boundaries are obtained from [GADM v3.6](https://gadm.org/download_world36.html), and are slightly simplified for display purposes.
     """
@@ -360,7 +388,7 @@ chropleth_px = px.choropleth(
     color=selected_var,
     color_continuous_scale="Viridis",
     labels={
-        selected_var: selected_var,
+        selected_var: selected_var_name,
         f"GID_{subnational_gadm_level}": "GID",
         f"NAME_{subnational_gadm_level}": "Region",
     },
