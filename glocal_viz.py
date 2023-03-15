@@ -141,14 +141,14 @@ glocal_0 = read_glocal_var(0, selected_var)
 
 # Ranks
 glocal_0_rank = read_data(
-    "supporting_data/glocal_0_rank.parquet", columns=["year", "GID_0", selected_var]
+    "glocal_0_rank.parquet", columns=["year", "GID_0", selected_var]
 )
 
 # Missing values
 glocal_missing_dict = {}
 for x in [0, 1, 2]:
     glocal_missing_dict[x] = read_data(
-        f"supporting_data/glocal_{x}_missing.parquet",
+        f"glocal_{x}_missing.parquet",
         columns=["year", "GID_0", selected_var],
     )
 
@@ -312,7 +312,7 @@ var_rank_year = glocal_0_rank.loc[
     (glocal_0_rank["GID_0"].isin(selected_countries))
     & (glocal_0_rank.year.between(*selected_year)),
     ["year", "GID_0", selected_var],
-].dropna()
+].dropna().sort_values(["year", "GID_0"])
 # Lineplot
 var_rank_year_px = px.line(
     var_rank_year,
