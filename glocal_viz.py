@@ -71,7 +71,7 @@ def gcsfs_to_geopandas(fs, BUCKET_NAME, file_name, columns=None):
 # 5. Shapefiles - detailed level
 
 
-@st.experimental_memo(ttl=900)
+@st.cache_data(ttl=900)
 def read_data(path_in_bucket, columns=None, spatial=False):
     # Get GCSFS
     fs = prepare_gcsfs()
@@ -118,7 +118,7 @@ selected_gadm_level = int(selected_gadm_string[-1])
 # Data reading functions
 # ------------------------------------
 # Read aggregations
-@st.experimental_memo(ttl=900)
+@st.cache_data(ttl=900)
 def read_glocal_var(level, selected_var):
     if level == 0:
         vars_to_read = ["year", "GID_0", selected_var]
@@ -370,7 +370,7 @@ glocal_subnational = (
 )
 
 # Read in shapefile and convert to geojson
-@st.experimental_memo(ttl=900)
+@st.cache_data(ttl=900)
 def get_country_shapefile(level, country):
     vars_to_read = [
         f"GID_{level}",
@@ -384,6 +384,8 @@ def get_country_shapefile(level, country):
     )
     gdf_json = json.loads(gdf.to_json())
     return gdf_json
+
+\
 
 
 # Read country shapefile
