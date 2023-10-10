@@ -1,7 +1,7 @@
-pandas==1.5.1
-geopandas==0.12.1
-pyarrow==10.0.0
-plotly==5.11.0
-streamlit==1.14.0
-google-cloud-storage==2.6.0
-gcsfs==2022.11.0
+pandas==2.1.1
+geopandas==0.14.0
+pyarrow==11.0.0
+plotly==5.17.0
+streamlit==1.27.2
+google-cloud-storage==2.11.0
+gcsfs==2023.6.0
