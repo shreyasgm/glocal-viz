@@ -504,11 +504,8 @@ chropleth_px = px.choropleth(
         f"NAME_{subnational_gadm_level}": "Region",
     },
 )
-# Assume `selected_country` is a variable storing the currently selected country.
 if selected_country == "USA":
-    chropleth_px.update_geos(scope="usa", fitbounds="locations")
-elif selected_country == "AUS":
-    chropleth_px.update_geos(scope="oceania", fitbounds="locations")
+    chropleth_px.update_geos(scope="usa")
 else:
     chropleth_px.update_geos(fitbounds="locations")
 
