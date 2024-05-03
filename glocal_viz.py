@@ -40,7 +40,11 @@ def prepare_gcsfs():
 def gcsfs_to_pandas(fs, BUCKET_NAME, file_name, columns=None):
     with fs.open(f"{BUCKET_NAME}/{file_name}") as f:
         if file_name.endswith(".parquet"):
-            df = pd.read_parquet(f, columns=columns)
+            try:
+                df = pd.read_parquet(f, columns=columns)
+            except Exception as e:
+                st.error(f"Error reading parquet file {file_name}")
+                raise e
         elif file_name.endswith(".csv"):
             if columns is not None:
                 raise ValueError("Columns not supported for CSV files")
@@ -63,6 +67,11 @@ def gcsfs_to_geopandas(fs, BUCKET_NAME, file_name, columns=None):
     return df
 
 
+@st.cache_data
+def convert_df(df):
+    return df.to_csv(index=False).encode("utf-8")
+
+
 # List of datasets being read
 # 1. Country codes
 # 2. Annualized aggregations data - detailed level
@@ -71,17 +80,61 @@ def gcsfs_to_geopandas(fs, BUCKET_NAME, file_name, columns=None):
 # 5. Shapefiles - detailed level
 
 
-@st.experimental_memo(ttl=900)
+@st.cache_data(ttl=900)
 def read_data(path_in_bucket, columns=None, spatial=False):
     # Get GCSFS
     fs = prepare_gcsfs()
     # Set GCS bucket name
-    BUCKET_NAME = "glocal"
+    BUCKET_NAME = "glocal_streamlit"
     if not spatial:
         df = gcsfs_to_pandas(fs, BUCKET_NAME, path_in_bucket, columns=columns)
     else:
         df = gcsfs_to_geopandas(fs, BUCKET_NAME, path_in_bucket, columns=columns)
     return df
+
+
+# Read in shapefile just for specific non-spatial variables
+@st.cache_data(ttl=900)
+def get_country_shapefile(level, country):
+    vars_to_read = [
+        f"GID_{level}",
+        f"NAME_{level}",
+    ]
+    gdf = read_data(
+        f"simplified_shapefiles/gadm/country_level/gadm_{level}/{country}.parquet",
+        columns=vars_to_read,
+        spatial=False,
+    )
+    # Ensure that all columns are present
+    for col in vars_to_read:
+        if col not in gdf.columns:
+            st.error(f"Column {col} not found in shapefile")
+            raise ValueError(f"Column {col} not found in shapefile")
+    return gdf
+
+
+# Read in shapefile and convert to geojson
+@st.cache_data(ttl=900)
+def get_country_shapefile_as_geojson(level, country):
+    vars_to_read = [
+        f"GID_{level}",
+        f"NAME_{level}",
+        "geometry",
+    ]
+    gdf = read_data(
+        f"simplified_shapefiles/gadm/country_level/gadm_{level}/{country}.parquet",
+        columns=vars_to_read,
+        spatial=True,
+    )
+    # Ensure that all columns are present
+    for col in vars_to_read:
+        if col not in gdf.columns:
+            st.error(f"Column {col} not found in shapefile")
+            raise ValueError(f"Column {col} not found in shapefile")
+
+    gdf_json = json.loads(gdf.to_json())
+
+    return gdf_json
 
 
 # -------------------------#
@@ -91,34 +144,61 @@ st.sidebar.title("Viz parameters")
 
 # Read general data
 
-# Country codes
 country_codes = read_data("country_codes.parquet")
-# Country
+docs = read_data("docs.parquet")
+available_cols = read_data("available_cols.parquet")
+
+# Country selection
 selected_country_name = st.sidebar.selectbox(
-    "Country", country_codes.country_name.unique()
+    "Country", country_codes.country_name.unique(), help="Select a country to analyze"
 )
 selected_country = country_codes[
     country_codes.country_name == selected_country_name
 ].country_code.values[0]
-# Documentation
-docs = read_data("docs.parquet")
-# Variable
-available_cols = read_data("available_cols.parquet")
+
+# Variable selection
 varlist = list(available_cols.variable_name)
-selected_var_name = st.sidebar.selectbox("Variable", varlist)
+# Remove "Country GID" and "Year" from the list
+varlist.remove("Country GID")
+varlist.remove("Year")
+selected_var_name = st.sidebar.selectbox(
+    "Variable", varlist, help="Select a variable to visualize"
+)
 selected_var = available_cols[
     available_cols.variable_name == selected_var_name
 ].colname.values[0]
-# GADM level
-selected_gadm_string = st.sidebar.radio("GADM level", ["GID_0", "GID_1", "GID_2"])
+
+# GADM level selection
+selected_gadm_string = st.sidebar.radio(
+    "GADM level",
+    ["GID_0", "GID_1", "GID_2"],
+    help="Select the administrative level for analysis",
+)
 selected_gadm_level = int(selected_gadm_string[-1])
+
+# Comparator countries selection
+selected_comparator_names = st.sidebar.multiselect(
+    label="Select Comparator Countries",
+    options=[
+        x for x in country_codes.country_name.unique() if x != selected_country_name
+    ],
+    default=None,
+    help="Select comparator countries for analysis (optional)",
+)
+if selected_comparator_names:
+    selected_comparators = country_codes[
+        country_codes.country_name.isin(selected_comparator_names)
+    ].country_code.values
+    selected_countries = [selected_country] + list(selected_comparators)
+else:
+    selected_countries = [selected_country]
 
 
 # ------------------------------------
 # Data reading functions
 # ------------------------------------
 # Read aggregations
-@st.experimental_memo(ttl=900)
+@st.cache_data(ttl=900)
 def read_glocal_var(level, selected_var):
     if level == 0:
         vars_to_read = ["year", "GID_0", selected_var]
@@ -168,22 +248,6 @@ for x in [0, 1, 2]:
 
 # ----------------
 # Add additional elements to sidebar
-# Multiselect for comparator countries
-selected_comparator_names = st.sidebar.multiselect(
-    label="Select comparator countries",
-    options=[
-        x for x in country_codes.country_name.unique() if x != selected_country_name
-    ],
-    default=None,
-)
-if selected_comparator_names:
-    selected_comparators = country_codes[
-        country_codes.country_name.isin(selected_comparator_names)
-    ].country_code.values
-    selected_countries = [selected_country] + list(selected_comparators)
-else:
-    selected_countries = [selected_country]
-
 # Slider select for year
 selected_year = st.sidebar.slider(
     "Select years for analysis",
@@ -198,14 +262,24 @@ selected_year = st.sidebar.slider(
 # Intro text
 # ------------------------------------
 
+with open("style.css") as css:
+    st.markdown(f"<style>{css.read()}</style>", unsafe_allow_html=True)
+
 st.title("Glocal Aggregations")
 st.markdown(
     """
     This app visualizes the aggregations developed as part of the Glocal project, which aims to develop a dataset that is globally comparable and yet granular enough to be locally relevant. The aggregations are developed at three levels of administrative boundaries: GID_0 (country), GID_1 (state/province), and GID_2 (county), using boundaries data from [GADM v3.6](https://gadm.org/download_world36.html).
 
+    Key features:
+    - Explore a wide range of economic, demographic, ecological, and socio-political variables
+    - Compare data across countries and subnational regions
+    - Visualize trends and rankings over time
+    - Access detailed variable information and documentation
+
     Resources:
-    - [Codebook](https://docs.google.com/spreadsheets/d/1d0YqkrAhZBW8tK4TvkE7_JBaDa6OgRxV5VgBojAHo_Y/edit#gid=783859190)
-    - [Github Repository](https://github.com/cid-harvard/glocal_aggregations)
+    - [Data Download](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/6TUCTE)
+    - [Codebook](https://docs.google.com/spreadsheets/d/1fpoI3AFh821tEuVSOwXm86kXWU7c4lt8J1-fnhysUn0/edit?usp=sharing)
+    - [Github Repository](https://github.com/shreyasgm/glocal)
     """
 )
 
@@ -213,18 +287,20 @@ docs_dict = docs.loc[docs.variable == selected_var].to_dict(orient="records")[0]
 
 st.markdown(
     f"""
-    ## Variable information
+    ## Variable Information
 
-    - Variable: {docs_dict["variable_name"]}
-    - Units: {docs_dict["units"]}
-    - Description: {docs_dict["description"]}
-    - Frequency: {docs_dict["frequency"]}
-    - Resolution: {docs_dict["resolution"]}
-    - Dataset name: {docs_dict["dataset_name"]}
-    - Source: {docs_dict["source"]}
-    - Source URL: {docs_dict["source_url"]}
-    - Terms of use: {docs_dict["license_terms_of_use"]}
-    - Citation: {docs_dict["citation"]}
+    |||
+    |-------|-------|
+    | Variable | {docs_dict["variable_name"]} |
+    | Units | {docs_dict["units"]} |
+    | Description | {docs_dict["description"]} |
+    | Frequency | {docs_dict["frequency"]} |
+    | Resolution | {docs_dict["resolution"]} |
+    | Dataset Name | {docs_dict["dataset_name"]} |
+    | Source | {docs_dict["source"]} |
+    | Source URL | {docs_dict["source_url"]} |
+    | Terms of Use | {docs_dict["license_terms_of_use"]} |
+    | Citation | {docs_dict["citation"]} |
     
     """
 )
@@ -232,14 +308,16 @@ st.markdown(
 # ------------------------------------
 # National level exhibits
 # ------------------------------------
+# Data availability
 st.markdown(
     f"""
-    ## Data availability
+    ## Data Availability
 
-    Earliest and latest year for which data is available at each level:
-    - Level 0: {availability_dict[0]}
-    - Level 1: {availability_dict[1]}
-    - Level 2: {availability_dict[2]}
+    | GADM Level | Earliest Year | Latest Year |
+    |------------|---------------|-------------|
+    | Level 0    | {availability_dict[0][0]} | {availability_dict[0][1] - 1} |
+    | Level 1    | {availability_dict[1][0]} | {availability_dict[1][1] - 1} |
+    | Level 2    | {availability_dict[2][0]} | {availability_dict[2][1] - 1} |
     """
 )
 
@@ -265,6 +343,10 @@ missing_px = px.line(
     template="plotly_white",
 )
 missing_px.update_xaxes(tickformat="%Y")
+missing_px.update_layout(
+    legend_title="Country",
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+)
 st.plotly_chart(missing_px, use_container_width=True)
 
 # ----------------
@@ -303,16 +385,32 @@ var_year_px = px.line(
     template="plotly_white",
 )
 var_year_px.update_xaxes(tickformat="%Y")
+var_year_px.update_layout(
+    legend_title="Country",
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+)
 st.plotly_chart(var_year_px, use_container_width=True)
+
+# Download button for national trends data
+st.download_button(
+    label="Download National Trends Data as CSV",
+    data=convert_df(var_year),
+    file_name=f"{selected_country}_national_trends_{selected_var_name}.csv",
+    mime="text/csv",
+)
 
 # ----------------
 # Plot the time series of the rank for the selected country for the selected variable
 # Filter data
-var_rank_year = glocal_0_rank.loc[
-    (glocal_0_rank["GID_0"].isin(selected_countries))
-    & (glocal_0_rank.year.between(*selected_year)),
-    ["year", "GID_0", selected_var],
-].dropna().sort_values(["year", "GID_0"])
+var_rank_year = (
+    glocal_0_rank.loc[
+        (glocal_0_rank["GID_0"].isin(selected_countries))
+        & (glocal_0_rank.year.between(*selected_year)),
+        ["year", "GID_0", selected_var],
+    ]
+    .dropna()
+    .sort_values(["year", "GID_0"])
+)
 # Lineplot
 var_rank_year_px = px.line(
     var_rank_year,
@@ -325,6 +423,10 @@ var_rank_year_px = px.line(
     template="plotly_white",
 )
 var_rank_year_px.update_xaxes(tickformat="%Y")
+var_rank_year_px.update_layout(
+    legend_title="Country",
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+)
 st.plotly_chart(var_rank_year_px, use_container_width=True)
 
 
@@ -369,25 +471,23 @@ glocal_subnational = (
     .reset_index()
 )
 
-# Read in shapefile and convert to geojson
-@st.experimental_memo(ttl=900)
-def get_country_shapefile(level, country):
-    vars_to_read = [
-        f"GID_{level}",
-        f"NAME_{level}",
-        "geometry",
-    ]
-    gdf = read_data(
-        f"simplified_shapefiles/gadm/country_level/gadm_{level}/{country}.parquet",
-        columns=vars_to_read,
-        spatial=True,
-    )
-    gdf_json = json.loads(gdf.to_json())
-    return gdf_json
+# Merge in gid names
+gid_names = get_country_shapefile(subnational_gadm_level, selected_country)
+glocal_subnational = glocal_subnational.merge(
+    gid_names, on=f"GID_{subnational_gadm_level}", how="left"
+)
+
+# Download button for subnational trends data
+st.download_button(
+    label="Download Subnational Trends Data",
+    data=convert_df(glocal_subnational),
+    file_name=f"{selected_country}_subnational_trends_{selected_var_name}.csv",
+    mime="text/csv",
+)
 
 
 # Read country shapefile
-gdf_json = get_country_shapefile(subnational_gadm_level, selected_country)
+gdf_json = get_country_shapefile_as_geojson(subnational_gadm_level, selected_country)
 
 # Plotly choropleth map
 chropleth_px = px.choropleth(
@@ -397,13 +497,20 @@ chropleth_px = px.choropleth(
     featureidkey=f"properties.GID_{subnational_gadm_level}",
     color=selected_var,
     color_continuous_scale="Viridis",
-    # hover_data = [f"NAME_{subnational_gadm_level}"],
+    hover_data=f"NAME_{subnational_gadm_level}",
     labels={
         selected_var: selected_var_name + " (" + docs_dict["units"] + ")",
         f"GID_{subnational_gadm_level}": "GID",
         f"NAME_{subnational_gadm_level}": "Region",
     },
 )
-chropleth_px.update_geos(fitbounds="locations", visible=True)
+# Assume `selected_country` is a variable storing the currently selected country.
+if selected_country == "USA":
+    chropleth_px.update_geos(scope="usa", fitbounds="locations")
+elif selected_country == "AUS":
+    chropleth_px.update_geos(scope="oceania", fitbounds="locations")
+else:
+    chropleth_px.update_geos(fitbounds="locations")
+
 chropleth_px.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
 st.plotly_chart(chropleth_px, use_container_width=True)
