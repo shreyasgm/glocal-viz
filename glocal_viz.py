@@ -193,6 +193,13 @@ if selected_comparator_names:
 else:
     selected_countries = [selected_country]
 
+# Optional display of ranks
+show_ranks = st.sidebar.checkbox(
+    label="Show Country Ranks",
+    value=False,
+    help="Show country ranks for the selected variable under 'National Trends'",
+)
+
 
 # ------------------------------------
 # Data reading functions
@@ -280,6 +287,8 @@ st.markdown(
     - [Data Download](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/6TUCTE)
     - [Codebook](https://docs.google.com/spreadsheets/d/1fpoI3AFh821tEuVSOwXm86kXWU7c4lt8J1-fnhysUn0/edit?usp=sharing)
     - [Github Repository](https://github.com/shreyasgm/glocal)
+    
+    **Data Licensing:** Data provided through Glocal are licensed under [terms available here](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/6TUCTE&version=2.0&selectTab=termsTab).
     """
 )
 
@@ -289,9 +298,14 @@ st.markdown(
     f"""
     ## Variable Information
 
+    Detailed information on the selected variable is provided in the codebook provided through the [Dataverse](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/6TUCTE&version=2.0&selectTab=termsTab).
+    
+    While the authors have endeavored to provide accurate and up-to-date information in the codebook, errors may exist. Users are encouraged to verify this information with the original sources. Please reach out to the authors if there are any issues related to the codebook or the underlying data.
+
     |||
     |-------|-------|
-    | Variable | {docs_dict["variable_name"]} |
+    | Variable | {selected_var} |
+    | Name | {docs_dict["variable_name"]} |
     | Units | {docs_dict["units"]} |
     | Description | {docs_dict["description"]} |
     | Frequency | {docs_dict["frequency"]} |
@@ -299,6 +313,7 @@ st.markdown(
     | Dataset Name | {docs_dict["dataset_name"]} |
     | Source | {docs_dict["source"]} |
     | Source URL | {docs_dict["source_url"]} |
+    | Notes | {docs_dict["notes"]} |
     | Terms of Use | {docs_dict["license_terms_of_use"]} |
     | Citation | {docs_dict["citation"]} |
     
@@ -381,6 +396,7 @@ var_year_px = px.line(
     y=selected_var,
     color="GID_0",
     title=f"{selected_var_name} ({docs_dict['units']})",
+    labels={"x": "Year", selected_var: f"{selected_var_name} ({docs_dict['units']})"},
     markers=True,
     template="plotly_white",
 )
@@ -401,33 +417,35 @@ st.download_button(
 
 # ----------------
 # Plot the time series of the rank for the selected country for the selected variable
-# Filter data
-var_rank_year = (
-    glocal_0_rank.loc[
-        (glocal_0_rank["GID_0"].isin(selected_countries))
-        & (glocal_0_rank.year.between(*selected_year)),
-        ["year", "GID_0", selected_var],
-    ]
-    .dropna()
-    .sort_values(["year", "GID_0"])
-)
-# Lineplot
-var_rank_year_px = px.line(
-    var_rank_year,
-    x="year",
-    y=selected_var,
-    color="GID_0",
-    title=f"Rank for variable {selected_var_name}",
-    markers=True,
-    labels={"x": "Year", "y": f"Rank for {selected_var_name}"},
-    template="plotly_white",
-)
-var_rank_year_px.update_xaxes(tickformat="%Y")
-var_rank_year_px.update_layout(
-    legend_title="Country",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-)
-st.plotly_chart(var_rank_year_px, use_container_width=True)
+
+if show_ranks:
+    # Filter data
+    var_rank_year = (
+        glocal_0_rank.loc[
+            (glocal_0_rank["GID_0"].isin(selected_countries))
+            & (glocal_0_rank.year.between(*selected_year)),
+            ["year", "GID_0", selected_var],
+        ]
+        .dropna()
+        .sort_values(["year", "GID_0"])
+    )
+    # Lineplot
+    var_rank_year_px = px.line(
+        var_rank_year,
+        x="year",
+        y=selected_var,
+        color="GID_0",
+        title=f"Rank for variable {selected_var_name}",
+        markers=True,
+        labels={"x": "Year", selected_var: f"Rank for {selected_var_name}"},
+        template="plotly_white",
+    )
+    var_rank_year_px.update_xaxes(tickformat="%Y")
+    var_rank_year_px.update_layout(
+        legend_title="Country",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(var_rank_year_px, use_container_width=True)
 
 
 # ------------------------------------
